@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "X Follow Intelligence",
+  "version": "1.0",
+  "description": "Tracks follows originating from networking posts",
+  "permissions": [
+    "storage",
+    "alarms"
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://x.com/*"],
+      "js": ["content.js"]
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  }
+}
