@@ -1,406 +1,103 @@
-console.log("🚀 X Follow Intelligence is running!");
-console.log("🔑 EXTENSION ID:", chrome.runtime.id);
+console.log("[XFI] content script active");
 
+const connectKeywords = ["let's connect", "lets connect", "looking to connect", "connect with", "grow together", "networking"];
+const seenPostIds = new Set();
+const listenerTargets = new WeakSet();
+let knownPosts = new Map();
 
-// ========================================
-// STORAGE
-// ========================================
+function log(event) { console.log(`[XFI] ${event}`); }
 
-const seenPosts = new Set();
-
-let detectedPosts = [];
-let trackedFollows = [];
-
-
-// ========================================
-// NETWORKING KEYWORDS
-// ========================================
-
-const connectKeywords = [
-  "let's connect",
-  "lets connect",
-  "looking to connect",
-  "connect with",
-  "grow together",
-  "networking",
-];
-
-
-// ========================================
-// LOAD SAVED DATA
-// ========================================
-
-chrome.storage.local.get(
-  ["detectedPosts", "trackedFollows"],
-  (result) => {
-
-    if (result.detectedPosts) {
-      detectedPosts = result.detectedPosts;
-
-      console.log(
-        "📦 Loaded saved posts:",
-        detectedPosts.length
-      );
-
-      detectedPosts.forEach((post) => {
-        seenPosts.add(post.url);
-      });
-    }
-
-    if (result.trackedFollows) {
-      trackedFollows = result.trackedFollows;
-
-      console.log(
-        "📦 Loaded tracked follows:",
-        trackedFollows.length
-      );
-    }
-
-    // Start observing the X page
-    postObserver.observe(document.body, {
-      childList: true,
-      subtree: true,
-    });
-
-    followObserver.observe(document.body, {
-      childList: true,
-      subtree: true,
-    });
-
-    // Initial scan
-    scanPosts();
-    scanFollowButtons();
+function canonicalPostFromArticle(article) {
+  const links = [...article.querySelectorAll('a[href*="/status/"]')];
+  for (const link of links) {
+    const postId = postIdFromUrl(link.href);
+    if (!postId) continue;
+    try {
+      const author = normalizeUsername(new URL(link.href).pathname.split("/")[1]);
+      if (!author) continue;
+      const text = article.querySelector('[data-testid="tweetText"]')?.innerText || "";
+      return { postId, author, url: link.href, text, createdAt: xfiNow() };
+    } catch { /* Try the next canonical status link. */ }
   }
-);
+  return null;
+}
 
+function isNetworkingPost(post) {
+  const text = post.text.toLowerCase();
+  return connectKeywords.some((keyword) => text.includes(keyword));
+}
 
-// ========================================
-// POST DETECTION
-// ========================================
+function followControlInPost(control, article) {
+  if (control.closest("article") !== article) return false;
+  const testId = (control.getAttribute("data-testid") || "").toLowerCase();
+  const aria = (control.getAttribute("aria-label") || "").toLowerCase();
+  // X's test id is the primary signal. The labelled-button fallback is deliberately narrow.
+  return testId === "follow" || testId.endsWith("-follow") || (control.getAttribute("role") === "button" && aria.startsWith("follow "));
+}
+
+function bindFollowControls(article, post) {
+  article.querySelectorAll('button, [role="button"]').forEach((control) => {
+    if (!followControlInPost(control, article) || listenerTargets.has(control)) return;
+    listenerTargets.add(control);
+    control.addEventListener("click", () => {
+      chrome.runtime.sendMessage({ type: "TRACK_FOLLOW", postId: post.postId, author: post.author })
+        .then((result) => { if (result?.ok && !result.duplicate) log("follow tracked from post context"); })
+        .catch(() => log("follow tracking request failed"));
+    }, { capture: true });
+  });
+}
+
+async function rememberNetworkingPost(post) {
+  const saved = await chrome.runtime.sendMessage({ type: "SAVE_DETECTED_POST", post });
+  if (saved) knownPosts.set(saved.postId, saved);
+  return saved;
+}
 
 function scanPosts() {
-
-  const posts = document.querySelectorAll("article");
-
-  posts.forEach((post) => {
-
-    const links = post.querySelectorAll(
-      'a[href*="/status/"]'
-    );
-
-    if (links.length === 0) return;
-
-    const postLink = links[0].href;
-
-    const author = postLink.split("/")[3];
-
-    if (seenPosts.has(postLink)) return;
-
-    seenPosts.add(postLink);
-
-    const tweetTextElement = post.querySelector(
-      '[data-testid="tweetText"]'
-    );
-
-    const tweetText = tweetTextElement
-      ? tweetTextElement.innerText
-      : "No text found";
-
-    const postData = {
-      author: author,
-      text: tweetText,
-      url: postLink,
-    };
-
-    console.log("🆕 NEW POST DETECTED");
-    console.log(postData);
-
-    const text = tweetText.toLowerCase();
-
-    const isConnectPost =
-      connectKeywords.some((keyword) =>
-        text.includes(keyword)
-      );
-
-    if (!isConnectPost) return;
-
-    detectedPosts.push(postData);
-
-    chrome.storage.local.set({
-      detectedPosts: detectedPosts,
-    });
-
-    console.log(
-      "🤝 POTENTIAL CONNECT POST DETECTED!"
-    );
-
-    console.log(
-      "Total detected:",
-      detectedPosts.length
-    );
-
-    console.log(postData);
+  document.querySelectorAll("article").forEach((article) => {
+    const post = canonicalPostFromArticle(article);
+    if (!post) return;
+    const known = knownPosts.get(post.postId);
+    if (known) {
+      bindFollowControls(article, known);
+      return;
+    }
+    if (seenPostIds.has(post.postId) || !isNetworkingPost(post)) return;
+    seenPostIds.add(post.postId);
+    rememberNetworkingPost(post).then((saved) => { if (saved) bindFollowControls(article, saved); }).catch(() => undefined);
   });
 }
 
+function profileFollowOutcome() {
+  const indicator = document.querySelector('[data-testid="userFollowIndicator"]');
+  if (!indicator) return { outcome: "CHECK_FAILED", errorReason: "FOLLOW_INDICATOR_MISSING" };
+  const text = indicator.textContent.trim().toLowerCase();
+  if (text === "follows you") return { outcome: "FOLLOWED_BACK" };
+  if (text === "does not follow you" || text === "not following you") return { outcome: "NOT_FOLLOWED_BACK" };
+  return { outcome: "CHECK_FAILED", errorReason: "FOLLOW_INDICATOR_UNRECOGNIZED" };
+}
 
-// ========================================
-// POST OBSERVER
-// ========================================
+function waitForProfileIndicator(timeout = 5000) {
+  return new Promise((resolve) => {
+    const check = () => document.querySelector('[data-testid="userFollowIndicator"]');
+    if (check()) return resolve(profileFollowOutcome());
+    const observer = new MutationObserver(() => {
+      if (check()) { observer.disconnect(); resolve(profileFollowOutcome()); }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    setTimeout(() => { observer.disconnect(); resolve({ outcome: "CHECK_FAILED", errorReason: "FOLLOW_INDICATOR_TIMEOUT" }); }, timeout);
+  });
+}
 
-const postObserver = new MutationObserver(() => {
-  scanPosts();
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type !== "CHECK_FOLLOW_BACK") return;
+  waitForProfileIndicator().then(sendResponse).catch(() => sendResponse({ outcome: "CHECK_FAILED", errorReason: "PROFILE_CHECK_EXCEPTION" }));
+  return true;
 });
 
+chrome.runtime.sendMessage({ type: "GET_STATE" }).then((state) => {
+  if (state) knownPosts = new Map(state.detectedPosts.map((post) => [post.postId, post]));
+  scanPosts();
+  new MutationObserver(scanPosts).observe(document.body, { childList: true, subtree: true });
+}).catch(() => log("initial state unavailable"));
 
-// ========================================
-// FOLLOW-BACK CHECK
-// ========================================
-
-function followsMe() {
-
-  const indicator = document.querySelector(
-    '[data-testid="userFollowIndicator"]'
-  );
-
-  if (!indicator) {
-    return false;
-  }
-
-  return (
-    indicator.innerText.trim() === "Follows you"
-  );
-}
-
-
-// Wait until X renders the follow indicator
-function waitForFollowIndicator(
-  timeout = 5000
-) {
-
-  return new Promise((resolve) => {
-
-    const existingIndicator =
-      document.querySelector(
-        '[data-testid="userFollowIndicator"]'
-      );
-
-    if (existingIndicator) {
-      resolve(existingIndicator);
-      return;
-    }
-
-    const observer = new MutationObserver(() => {
-
-      const indicator =
-        document.querySelector(
-          '[data-testid="userFollowIndicator"]'
-        );
-
-      if (indicator) {
-
-        observer.disconnect();
-
-        resolve(indicator);
-      }
-    });
-
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true,
-    });
-
-    setTimeout(() => {
-
-      observer.disconnect();
-
-      resolve(null);
-
-    }, timeout);
-  });
-}
-
-
-// ========================================
-// MESSAGE FROM BACKGROUND
-// ========================================
-
-chrome.runtime.onMessage.addListener(
-  (message, sender, sendResponse) => {
-
-    console.log("📩 MESSAGE:", message);
-
-    if (
-      message.type !== "CHECK_FOLLOW_BACK"
-    ) {
-      return;
-    }
-
-    console.log(
-      "🔍 CHECKING USER:",
-      message.author
-    );
-
-    waitForFollowIndicator().then(
-      (indicator) => {
-
-        console.log(
-          "🔎 INDICATOR:",
-          indicator
-        );
-
-        const followedBack =
-          followsMe();
-
-        console.log(
-          "🤝 FOLLOWED BACK:",
-          followedBack
-        );
-
-        sendResponse({
-          author: message.author,
-          followedBack: followedBack,
-        });
-      }
-    );
-
-    // Keep message channel open
-    return true;
-  }
-);
-
-
-// ========================================
-// FOLLOW BUTTON DETECTION
-// ========================================
-
-const followObserver =
-  new MutationObserver(() => {
-
-    scanFollowButtons();
-
-  });
-
-
-function scanFollowButtons() {
-
-  const menuItems =
-    document.querySelectorAll(
-      '[role="menuitem"]'
-    );
-
-  menuItems.forEach((item) => {
-
-    const text =
-      item.innerText.trim();
-
-    if (!text.startsWith("Follow @")) {
-      return;
-    }
-
-    const username =
-      text.replace("Follow @", "");
-
-    console.log(
-      "🟡 NOT FOLLOWING:",
-      username
-    );
-
-    if (
-      item.dataset.followListenerAttached
-    ) {
-      return;
-    }
-
-    item.dataset.followListenerAttached =
-      "true";
-
-    item.addEventListener(
-      "click",
-      () => {
-
-        console.log(
-          "🎯 FOLLOW CLICKED:",
-          username
-        );
-
-        const matchedPost =
-          detectedPosts.find(
-            (post) =>
-              post.author === username
-          );
-
-        console.log(
-          "🔎 MATCHED POST:",
-          matchedPost
-        );
-
-        if (!matchedPost) {
-
-          console.log(
-            "⚠️ FOLLOW NOT TRACKED — NO MATCHING NETWORKING POST"
-          );
-
-          return;
-        }
-
-        console.log(
-          "🤝 NETWORKING FOLLOW CONFIRMED!"
-        );
-
-        const alreadyTracked =
-          trackedFollows.some(
-            (follow) =>
-              follow.author === username &&
-              follow.status === "WAITING"
-          );
-
-        if (alreadyTracked) {
-
-          console.log(
-            "⚠️ USER ALREADY BEING TRACKED"
-          );
-
-          return;
-        }
-
-        const followData = {
-
-          author: username,
-
-          followedAt:
-            new Date().toISOString(),
-
-          post: matchedPost,
-
-          followedBack: undefined,
-
-          status: "WAITING",
-        };
-
-        trackedFollows.push(
-          followData
-        );
-
-        chrome.storage.local.set(
-          {
-            trackedFollows:
-              trackedFollows,
-          },
-          () => {
-
-            console.log(
-              "📌 FOLLOW TRACKED:",
-              followData
-            );
-
-            chrome.runtime.sendMessage({
-              type: "FOLLOW_TRACKED",
-              author: username,
-            });
-          }
-        );
-      }
-    );
-  });
-}

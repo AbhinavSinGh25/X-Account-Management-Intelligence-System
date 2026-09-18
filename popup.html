@@ -3,52 +3,22 @@
 <head>
   <title>X Follow Intelligence</title>
   <style>
-  body {
-    width: 300px;
-    padding: 15px;
-  }
-
-  .card {
-    padding: 10px;
-    margin-bottom: 10px;
-    border: 1px solid #ddd;
-    border-radius: 8px;
-  }
-
-  .followed {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.consider {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  display: inline-block;
-}
-
-.followed .status-dot {
-  background-color: green;
-}
-
-.consider .status-dot {
-  background-color: orange;
-}
-</style>
+    body { width: 300px; padding: 15px; }
+    .card { padding: 10px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 8px; }
+    .followed, .consider, .negative { display: flex; align-items: center; gap: 6px; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+    .followed .status-dot { background-color: green; }
+    .consider .status-dot { background-color: orange; }
+    .negative .status-dot { background-color: #b42318; }
+    small { display: block; margin-top: 4px; }
+    .empty { color: #555; }
+  </style>
 </head>
-
 <body>
-
   <h1>X Follow Intelligence</h1>
-
   <div id="follows"></div>
-    <script src="popup.js"></script>
+  <script src="storage.js"></script>
+  <script src="popup.js"></script>
 </body>
 </html>
+
