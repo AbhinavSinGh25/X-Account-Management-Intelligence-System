@@ -1,54 +1,128 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>X Follow Intelligence</title>
   <style>
-  body {
-    width: 300px;
-    padding: 15px;
-  }
+    body {
+      width: 380px;
+      margin: 0;
+      padding: 16px;
+      box-sizing: border-box;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #fff;
+      color: #111;
+    }
 
-  .card {
-    padding: 10px;
-    margin-bottom: 10px;
-    border: 1px solid #ddd;
-    border-radius: 8px;
-  }
+    h2 {
+      margin: 0 0 6px;
+      font-size: 20px;
+    }
 
-  .followed {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
+    .subtitle {
+      color: #666;
+      font-size: 12px;
+      margin-bottom: 14px;
+    }
 
-.consider {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
+    .summary {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
 
-.status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  display: inline-block;
-}
+    .summary-card {
+      flex: 1;
+      padding: 10px;
+      border: 1px solid #e5e5e5;
+      border-radius: 10px;
+      background: #fafafa;
+    }
 
-.followed .status-dot {
-  background-color: green;
-}
+    .summary-card strong {
+      display: block;
+      font-size: 18px;
+    }
 
-.consider .status-dot {
-  background-color: orange;
-}
-</style>
+    .summary-card span {
+      color: #666;
+      font-size: 11px;
+    }
+
+    .card {
+      border: 1px solid #e5e5e5;
+      border-radius: 10px;
+      padding: 12px;
+      margin-bottom: 8px;
+    }
+
+    .card strong {
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    .card p {
+      margin: 4px 0 8px;
+      font-size: 13px;
+    }
+
+    .card small {
+      display: block;
+      color: #666;
+      font-size: 11px;
+      margin-top: 4px;
+    }
+
+    .status-dot {
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #888;
+      margin-right: 6px;
+    }
+
+    .followed .status-dot {
+      background: #1a9b55;
+    }
+
+    .negative .status-dot {
+      background: #d34a4a;
+    }
+
+    .waiting .status-dot {
+      background: #d99b22;
+    }
+
+    a {
+      color: #1d72f3;
+      text-decoration: none;
+      font-size: 12px;
+    }
+
+    .empty {
+      padding: 24px 8px;
+      text-align: center;
+      color: #777;
+      font-size: 13px;
+    }
+  </style>
 </head>
-
 <body>
+  <h2>X Follow Intelligence</h2>
+  <div class="subtitle">Networking follows</div>
 
-  <h1>X Follow Intelligence</h1>
+  <div class="summary">
+    <div class="summary-card">
+      <strong id="total">0</strong>
+      <span>Total tracked</span>
+    </div>
+  </div>
 
   <div id="follows"></div>
-    <script src="popup.js"></script>
+
+  <script src="storage.js"></script>
+  <script src="popup.js"></script>
 </body>
 </html>

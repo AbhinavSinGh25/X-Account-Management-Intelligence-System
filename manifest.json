@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "X Follow Intelligence",
-  "version": "1.0",
-  "description": "Tracks follows originating from networking posts",
+  "version": "2.0.0",
+  "description": "Tracks networking-related follows on X and monitors follow-back status.",
   "permissions": [
     "storage",
     "alarms"
@@ -12,8 +12,14 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://x.com/*"],
-      "js": ["content.js"]
+      "matches": [
+        "https://x.com/*"
+      ],
+      "js": [
+        "storage.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
     }
   ],
   "background": {
