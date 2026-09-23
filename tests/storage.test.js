@@ -30,6 +30,9 @@ const legacy = s.normalizeFollow({
 
 assert.equal(legacy.author, "user");
 assert.equal(legacy.status, "CHECK_FAILED");
+
+const unfollowed = s.normalizeFollow({ author: "@User", status: "UNFOLLOWED" });
+assert.equal(unfollowed.status, "UNFOLLOWED");
 assert.ok(legacy.followId);
 assert.equal(legacy.postId, "post_12345");
 

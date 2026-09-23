@@ -2,9 +2,55 @@ const connectKeywords = [
   "let's connect",
   "lets connect",
   "looking to connect",
-  "connect with",
+  "connect with me",
+  "connect with us",
+  "connect with you",
+  "feel free to connect",
+  "happy to connect",
+  "would love to connect",
+  "open to connecting",
+  "open to connect",
+  "let's network",
+  "lets network",
+  "network with",
+  "networking",
   "grow together",
-  "networking"
+];
+
+const networkingContextWords = [
+  "founder",
+  "founders",
+  "developer",
+  "developers",
+  "engineer",
+  "engineers",
+  "designer",
+  "designers",
+  "professional",
+  "professionals",
+  "recruiter",
+  "recruiters",
+  "career",
+  "careers",
+  "job",
+  "jobs",
+  "hiring",
+  "startup",
+  "startups",
+  "entrepreneur",
+  "entrepreneurs",
+  "tech",
+  "technology",
+  "community",
+  "communities",
+  "network",
+  "networking",
+  "opportunity",
+  "opportunities",
+  "collaborate",
+  "collaboration",
+  "dm",
+  "reach out",
 ];
 
 const seenPosts = new Set();
@@ -15,6 +61,7 @@ let trackedFollows = [];
 
 const followContext = new Map();
 const FOLLOW_CONTEXT_TTL = 8000;
+let lastFollowingContext = null;
 
 function normalizeUsername(value) {
   return XFIStorage.normalizeUsername(value);
@@ -25,8 +72,7 @@ function extractUsernameFromLink(link) {
   try {
     const url = new URL(link.href, location.origin);
     const parts = url.pathname.split("/").filter(Boolean);
-    if (!parts.length) return "";
-    if (parts[0] === "i") return "";
+    if (!parts.length || parts[0] === "i") return "";
     if (parts[1] === "status") return normalizeUsername(parts[0]);
     return normalizeUsername(parts[0]);
   } catch {
@@ -50,8 +96,28 @@ function getPostText(article) {
 }
 
 function isNetworkingText(text) {
-  const normalized = text.toLowerCase();
-  return connectKeywords.some((keyword) => normalized.includes(keyword));
+  const normalized = String(text || "")
+    .toLowerCase()
+    .replaceAll("#", "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!normalized) return false;
+
+  const hasDirectSignal = connectKeywords.some((keyword) =>
+    normalized.includes(keyword)
+  );
+
+  if (hasDirectSignal) return true;
+
+  const hasNetworkWord = /\b(connect|connecting|network|networking)\b/i.test(
+    normalized
+  );
+  const hasProfessionalContext = networkingContextWords.some((word) =>
+    normalized.includes(word)
+  );
+
+  return hasNetworkWord && hasProfessionalContext;
 }
 
 function findDetectedPost(author) {
@@ -61,11 +127,10 @@ function findDetectedPost(author) {
 
 function armFollowContext(author, post) {
   if (!author || !post) return;
-
   followContext.set(author, {
     author,
     post,
-    expiresAt: Date.now() + FOLLOW_CONTEXT_TTL
+    expiresAt: Date.now() + FOLLOW_CONTEXT_TTL,
   });
 }
 
@@ -84,34 +149,32 @@ function scanPosts() {
     if (!url) return;
 
     const postId = XFIStorage.makePostId(url);
-    if (seenPosts.has(postId)) return;
 
     const author = getAuthorFromArticle(article);
     const text = getPostText(article);
-
-    // Do not mark a post seen until its text/author are available.
     if (!author || !text) return;
 
-    seenPosts.add(postId);
-
+    // X can render the article before the tweet text is complete.
+    // Only mark it seen after we have classified the current text.
+    if (seenPosts.has(postId)) return;
     if (!isNetworkingText(text)) return;
+
+    seenPosts.add(postId);
 
     const post = {
       postId,
       author,
       text,
       url,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
     };
 
     detectedPosts = [
       post,
-      ...detectedPosts.filter((item) => item.postId !== postId)
+      ...detectedPosts.filter((item) => item.postId !== postId),
     ];
-    chrome.runtime.sendMessage({
-      type: "DETECTED_POST",
-      post
-    }, () => {
+
+    chrome.runtime.sendMessage({ type: "DETECTED_POST", post }, () => {
       void chrome.runtime.lastError;
     });
   });
@@ -120,21 +183,87 @@ function scanPosts() {
 function getFollowCandidate(element) {
   if (!element) return "";
 
+  const text = (element.innerText || element.textContent || "").trim();
   const aria = element.getAttribute?.("aria-label") || "";
   const dataTest = element.getAttribute?.("data-testid") || "";
-  const text = (element.innerText || element.textContent || "").trim();
 
-  const values = [aria, text, dataTest];
+  // Prefer visible text because X can expose stale/generated aria labels.
+  const values = [text, aria, dataTest];
 
   for (const value of values) {
     const match = value.match(/^Follow(?:\s+@?([A-Za-z0-9_]+))?$/i);
     if (match?.[1]) return normalizeUsername(match[1]);
   }
 
-  if (/^follow$/i.test(aria) || /^follow$/i.test(text)) {
-    const link = element.closest("div")?.querySelector('a[href^="/"][href*="/status/"], a[href^="/"]:not([href*="/status/"])');
+  if (/^follow$/i.test(text) || /^follow$/i.test(aria)) {
+    const link = element
+      .closest("div")
+      ?.querySelector(
+        'a[href^="/"][href*="/status/"], a[href^="/"]:not([href*="/status/"])',
+      );
     const fromLink = extractUsernameFromLink(link);
     if (fromLink) return fromLink;
+  }
+
+  return "";
+}
+
+function getUnfollowCandidate(element) {
+  if (!element) return "";
+
+  const text = (element.innerText || element.textContent || "").trim();
+  const aria = element.getAttribute?.("aria-label") || "";
+  const dataTest = element.getAttribute?.("data-testid") || "";
+
+  const values = [text, aria, dataTest];
+
+  for (const value of values) {
+    const match = value.match(/^Unfollow(?:\s+@?([A-Za-z0-9_]+))?/i);
+
+    if (match?.[1]) {
+      return normalizeUsername(match[1]);
+    }
+  }
+
+  if (
+    values.some((value) =>
+      /^unfollow(?:\s|$)/i.test(value.trim())
+    )
+  ) {
+    return getUsernameNearElement(element);
+  }
+
+  return "";
+}
+
+function getUsernameNearElement(element) {
+  if (
+    lastFollowingContext &&
+    lastFollowingContext.expiresAt > Date.now()
+  ) {
+    return lastFollowingContext.username;
+  }
+
+  const article = element.closest("article");
+  if (article) {
+    const author = getAuthorFromArticle(article);
+    if (author) return author;
+  }
+
+  const href = element
+    .closest("div")
+    ?.querySelector('a[href^="/"]:not([href^="/i/"])');
+
+  const linkedUsername = extractUsernameFromLink(href);
+  if (linkedUsername) return linkedUsername;
+
+  try {
+    const parts = location.pathname.split("/").filter(Boolean);
+    if (parts.length === 1 && parts[0] !== "home") {
+      return normalizeUsername(parts[0]);
+    }
+  } catch {
+    // Ignore malformed/non-profile URLs.
   }
 
   return "";
@@ -148,9 +277,7 @@ function getFollowContextForElement(element, username) {
     const author = getAuthorFromArticle(article);
     if (url && author === username) {
       const post = detectedPosts.find((item) => item.url === url);
-      if (post) {
-        return { post, source: "direct" };
-      }
+      if (post) return { post, source: "direct" };
     }
   }
 
@@ -161,13 +288,8 @@ function getFollowContextForElement(element, username) {
     return { post: armed.post, source: "armed_context" };
   }
 
-  // Compatibility fallback with V1 behavior.
-  // This preserves working tracking when X detaches the Follow control
-  // from the post DOM and no stronger context is available.
   const fallback = findDetectedPost(username);
-  if (fallback) {
-    return { post: fallback, source: "author_fallback" };
-  }
+  if (fallback) return { post: fallback, source: "author_fallback" };
 
   return null;
 }
@@ -183,7 +305,7 @@ function trackFollow(username, context) {
     status: "WAITING",
     lastCheckResult: null,
     errorReason: null,
-    post: context.post
+    post: context.post,
   });
 
   if (!follow) return;
@@ -191,27 +313,45 @@ function trackFollow(username, context) {
   const alreadyTracked = trackedFollows.some(
     (item) =>
       item.author === username &&
-      ["WAITING", "CHECKING", "RETRY_PENDING"].includes(item.status)
+      ["WAITING", "CHECKING", "RETRY_PENDING"].includes(item.status),
   );
 
-  if (alreadyTracked) {
-    return;
-  }
+  if (alreadyTracked) return;
 
   trackedFollows.push(follow);
-  chrome.runtime.sendMessage({
-    type: "FOLLOW_TRACKED",
-    follow
-  }, (response) => {
-    if (chrome.runtime.lastError || !response?.ok) {
+  chrome.runtime.sendMessage({ type: "FOLLOW_TRACKED", follow }, () => {
+    void chrome.runtime.lastError;
+  });
+}
+
+function rememberFollowingContext(element) {
+  const text = (element?.innerText || element?.textContent || "").trim();
+  const aria = element?.getAttribute?.("aria-label") || "";
+  const values = [text, aria];
+
+  for (const value of values) {
+    const match = value.match(/^Following(?:\s+@?([A-Za-z0-9_]+))?/i);
+    if (match?.[1]) {
+      lastFollowingContext = {
+        username: normalizeUsername(match[1]),
+        expiresAt: Date.now() + FOLLOW_CONTEXT_TTL,
+      };
       return;
     }
-  });
+  }
+
+  const username = getUsernameNearElement(element);
+  if (username) {
+    lastFollowingContext = {
+      username,
+      expiresAt: Date.now() + FOLLOW_CONTEXT_TTL,
+    };
+  }
 }
 
 function scanFollowControls() {
   const candidates = document.querySelectorAll(
-    'button, [role="button"], [role="menuitem"], [data-testid]'
+    'button, [role="button"], [role="menuitem"], [data-testid]',
   );
 
   candidates.forEach((element) => {
@@ -222,119 +362,192 @@ function scanFollowControls() {
 
     seenFollowControls.add(element);
 
-    element.addEventListener("click", () => {
-      const context = getFollowContextForElement(element, username);
-
-      if (!context) {
-        console.log("[XFI] Follow detected but no reliable networking-post context; ignored.", {
-          username
-        });
-        return;
-      }
-
-      trackFollow(username, context);
-    }, { capture: true });
+    element.addEventListener(
+      "click",
+      () => {
+        const context = getFollowContextForElement(element, username);
+        if (!context) {
+          console.log(
+            "[XFI] Follow detected but no reliable networking-post context; ignored.",
+            { username },
+          );
+          return;
+        }
+        trackFollow(username, context);
+      },
+      { capture: true },
+    );
   });
 }
 
-// Capture clicks globally as a second path for detached/portal-based X controls.
-document.addEventListener("click", (event) => {
-  const target = event.target instanceof Element
-    ? event.target.closest('button, [role="button"], [role="menuitem"], [data-testid]')
-    : null;
+document.addEventListener(
+  "click",
+  (event) => {
+    const target =
+      event.target instanceof Element
+        ? event.target.closest(
+            'button, [role="button"], [role="menuitem"], [data-testid]',
+          )
+        : null;
+    if (!target) return;
 
-  if (!target) return;
+    const unfollowUsername = getUnfollowCandidate(target);
+    if (unfollowUsername) {
+      chrome.runtime.sendMessage(
+        { type: "FOLLOW_UNFOLLOWED", username: unfollowUsername },
+        () => {
+          void chrome.runtime.lastError;
+        },
+      );
+      return;
+    }
 
-  const username = getFollowCandidate(target);
-  if (!username) return;
+    const followingText =
+      `${target.innerText || ""} ${target.getAttribute("aria-label") || ""}`.trim();
+    if (/^following(?:\s|$)/i.test(followingText)) {
+      rememberFollowingContext(target);
+    }
+  },
+  true,
+);
 
-  const context = getFollowContextForElement(target, username);
-  if (!context) {
-    console.log("[XFI] Follow detected but no reliable networking-post context; ignored.", {
-      username
-    });
-    return;
-  }
+document.addEventListener(
+  "click",
+  (event) => {
+    const target =
+      event.target instanceof Element
+        ? event.target.closest(
+            'button, [role="button"], [role="menuitem"], [data-testid]',
+          )
+        : null;
+    if (!target) return;
 
-  trackFollow(username, context);
-}, true);
+    const username = getFollowCandidate(target);
+    if (!username) return;
 
-document.addEventListener("pointerover", (event) => {
-  const target = event.target instanceof Element
-    ? event.target.closest("a[href]")
-    : null;
+    const context = getFollowContextForElement(target, username);
+    if (!context) {
+      console.log(
+        "[XFI] Follow detected but no reliable networking-post context; ignored.",
+        { username },
+      );
+      return;
+    }
 
-  if (!target) return;
+    trackFollow(username, context);
+  },
+  true,
+);
 
-  const username = extractUsernameFromLink(target);
-  if (!username) return;
+document.addEventListener(
+  "pointerover",
+  (event) => {
+    const target =
+      event.target instanceof Element ? event.target.closest("a[href]") : null;
+    if (!target) return;
 
-  const article = target.closest("article");
-  if (!article) return;
+    const username = extractUsernameFromLink(target);
+    if (!username) return;
 
-  const url = getPostUrlFromArticle(article);
-  const author = getAuthorFromArticle(article);
+    const article = target.closest("article");
+    if (!article) return;
 
-  if (!url || author !== username) return;
+    const url = getPostUrlFromArticle(article);
+    const author = getAuthorFromArticle(article);
+    if (!url || author !== username) return;
 
-  const post = detectedPosts.find((item) => item.url === url);
-  if (post) armFollowContext(username, post);
-}, true);
+    const post = detectedPosts.find((item) => item.url === url);
+    if (post) armFollowContext(username, post);
+  },
+  true,
+);
+
+function hasVisibleText(pattern) {
+  return [...document.querySelectorAll("span, div")].some((node) => {
+    if (!(node instanceof HTMLElement)) return false;
+    const text = (node.innerText || node.textContent || "").trim();
+    if (!text || text.length > 80 || !pattern.test(text)) return false;
+    const style = window.getComputedStyle(node);
+    return style.display !== "none" && style.visibility !== "hidden";
+  });
+}
 
 function followsMe() {
-  const indicators = [...document.querySelectorAll(
-    '[data-testid="userFollowIndicator"]'
-  )];
+  const pageText = document.body?.innerText || "";
 
-  const indicator = indicators.find((node) =>
-    /follows you/i.test((node.innerText || node.textContent || "").trim())
-  );
-
-  if (indicator) {
+  // Positive proof: the target explicitly follows us.
+  if (/follows you/i.test(pageText)) {
     return "FOLLOWED_BACK";
   }
 
-  // A profile page with a visible follow button means the target isn't
-  // currently following us. Only treat it as negative when the profile
-  // UI has actually rendered.
-  const buttons = [...document.querySelectorAll('button, [role="button"]')];
-  const hasFollowButton = buttons.some((node) => {
-    const label = `${node.getAttribute("aria-label") || ""} ${node.innerText || ""}`;
-    return /^follow\b/i.test(label.trim());
+  const controls = [
+    ...document.querySelectorAll(
+      'button, [role="button"], [data-testid]'
+    )
+  ];
+
+  const hasFollowingControl = controls.some((node) => {
+    if (!(node instanceof HTMLElement)) return false;
+
+    const values = [
+      node.getAttribute("aria-label") || "",
+      node.innerText || "",
+      node.textContent || ""
+    ]
+      .map((value) => value.trim())
+      .filter(Boolean);
+
+    return values.some((value) =>
+      /^following(?:\s|$)/i.test(value)
+    );
   });
 
-  if (hasFollowButton) {
+  if (hasFollowingControl) {
     return "NOT_FOLLOWED_BACK";
   }
 
   return "UNKNOWN";
 }
 
-function waitForFollowResult(timeout = 7000) {
+
+function waitForFollowResult(timeout = 10000) {
   return new Promise((resolve) => {
-    const result = followsMe();
-    if (result !== "UNKNOWN") {
+    let settled = false;
+
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      observer.disconnect();
+      clearTimeout(timeoutTimer);
+      clearTimeout(initialDelayTimer);
       resolve(result);
-      return;
-    }
+    };
 
     const observer = new MutationObserver(() => {
-      const next = followsMe();
-      if (next !== "UNKNOWN") {
-        observer.disconnect();
-        resolve(next);
+      const result = followsMe();
+
+      if (result !== "UNKNOWN") {
+        finish(result);
       }
     });
 
     observer.observe(document.body, {
       childList: true,
       subtree: true,
-      attributes: true
+      attributes: true,
     });
 
-    setTimeout(() => {
-      observer.disconnect();
-      resolve("UNKNOWN");
+    // Give X time to hydrate/render the profile UI.
+    const initialDelayTimer = setTimeout(() => {
+      const result = followsMe();
+
+      if (result !== "UNKNOWN") {
+        finish(result);
+      }
+    }, 2500);
+
+    const timeoutTimer = setTimeout(() => {
+      finish("UNKNOWN");
     }, timeout);
   });
 }
@@ -343,24 +556,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type !== "CHECK_FOLLOW_BACK") return;
 
   waitForFollowResult().then((result) => {
+    let response;
+
     if (result === "FOLLOWED_BACK") {
-      sendResponse({
-        result: "FOLLOWED_BACK"
-      });
-      return;
+      response = { result: "FOLLOWED_BACK" };
+    } else if (result === "NOT_FOLLOWED_BACK") {
+      response = { result: "NOT_FOLLOWED_BACK" };
+    } else {
+      response = {
+        result: "UNKNOWN",
+        errorReason: "FOLLOW_BACK_UI_NOT_DETERMINED",
+      };
     }
 
-    if (result === "NOT_FOLLOWED_BACK") {
-      sendResponse({
-        result: "NOT_FOLLOWED_BACK"
-      });
-      return;
-    }
-
-    sendResponse({
-      result: "UNKNOWN",
-      errorReason: "FOLLOW_BACK_UI_NOT_DETERMINED"
-    });
+    sendResponse(response);
   });
 
   return true;
@@ -371,42 +580,27 @@ const postObserver = new MutationObserver(() => {
   scanFollowControls();
 });
 
-const followObserver = new MutationObserver(() => {
-  scanFollowControls();
-});
+const followObserver = new MutationObserver(() => scanFollowControls());
 
 function startObservers() {
   if (!document.body) return;
 
-  postObserver.observe(document.body, {
-    childList: true,
-    subtree: true
-  });
-
-  followObserver.observe(document.body, {
-    childList: true,
-    subtree: true
-  });
-
+  postObserver.observe(document.body, { childList: true, subtree: true });
+  followObserver.observe(document.body, { childList: true, subtree: true });
   scanPosts();
   scanFollowControls();
-
   setInterval(cleanupExpiredContexts, 2000);
 }
 
-chrome.storage.local.get(
-  ["detectedPosts", "trackedFollows"],
-  (result) => {
-    detectedPosts = Array.isArray(result.detectedPosts)
-      ? result.detectedPosts.map(XFIStorage.normalizePost).filter(Boolean)
-      : [];
+chrome.storage.local.get(["detectedPosts", "trackedFollows"], (result) => {
+  detectedPosts = Array.isArray(result.detectedPosts)
+    ? result.detectedPosts.map(XFIStorage.normalizePost).filter(Boolean)
+    : [];
 
-    trackedFollows = Array.isArray(result.trackedFollows)
-      ? result.trackedFollows.map(XFIStorage.normalizeFollow).filter(Boolean)
-      : [];
+  trackedFollows = Array.isArray(result.trackedFollows)
+    ? result.trackedFollows.map(XFIStorage.normalizeFollow).filter(Boolean)
+    : [];
 
-    detectedPosts.forEach((post) => seenPosts.add(post.postId));
-
-    startObservers();
-  }
-);
+  detectedPosts.forEach((post) => seenPosts.add(post.postId));
+  startObservers();
+});
