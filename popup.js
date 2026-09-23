@@ -13,6 +13,8 @@ function statusLabel(follow) {
       return "Not followed back";
     case "RETRY_PENDING":
       return "Retry pending";
+    case "UNFOLLOWED":
+      return "Unfollowed";
     case "CHECK_FAILED":
       return "Check failed";
     default:
@@ -22,6 +24,7 @@ function statusLabel(follow) {
 
 function statusClass(status) {
   if (status === "FOLLOWED_BACK") return "followed";
+  if (status === "UNFOLLOWED") return "unfollowed";
   if (["CHECK_FAILED", "NOT_FOLLOWED_BACK"].includes(status)) return "negative";
   return "waiting";
 }

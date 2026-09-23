@@ -1,11 +1,14 @@
 {
   "manifest_version": 3,
   "name": "X Follow Intelligence",
-  "version": "2.0.0",
+  "version": "2.1.1",
   "description": "Tracks networking-related follows on X and monitors follow-back status.",
   "permissions": [
     "storage",
     "alarms"
+  ],
+  "host_permissions": [
+    "http://localhost:3000/*"
   ],
   "action": {
     "default_popup": "popup.html"

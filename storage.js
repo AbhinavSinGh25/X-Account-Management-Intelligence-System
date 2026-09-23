@@ -1,5 +1,5 @@
 (() => {
-  const SCHEMA_VERSION = 2;
+  const SCHEMA_VERSION = 3;
 
   function normalizeUsername(value) {
     if (!value) return "";
@@ -40,6 +40,7 @@
 
     return {
       postId: raw.postId || makePostId(url),
+      backendPostId: raw.backendPostId || null,
       author,
       text: String(raw.text || "").slice(0, 5000),
       url,
@@ -49,7 +50,7 @@
 
   function normalizeStatus(raw) {
     if (raw === "CONSIDER_UNFOLLOWING") return "CHECK_FAILED";
-    if (["WAITING", "CHECKING", "FOLLOWED_BACK", "NOT_FOLLOWED_BACK", "CHECK_FAILED", "RETRY_PENDING"].includes(raw)) {
+    if (["WAITING", "CHECKING", "FOLLOWED_BACK", "NOT_FOLLOWED_BACK", "RETRY_PENDING", "CHECK_FAILED", "UNFOLLOWED"].includes(raw)) {
       return raw;
     }
     return "WAITING";
@@ -62,6 +63,7 @@
     const post = normalizePost(raw.post || {});
     return {
       followId: raw.followId || makeId("follow"),
+      backendFollowId: raw.backendFollowId || null,
       postId: raw.postId || post?.postId || null,
       author,
       followedAt: raw.followedAt || raw.time || new Date().toISOString(),
